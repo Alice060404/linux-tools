@@ -1,64 +1,89 @@
 # linux-tools
 
-Personal Linux command-line tools for Ubuntu and Debian VPS maintenance.
+## 项目简介
 
-## Project Summary
+适用于 Ubuntu VPS 的常用脚本工具集合。
 
-`linux-tools` is a small collection of Bash utilities. The current tool is `vpsinfo`, a lightweight status command for quickly checking basic VPS runtime information over SSH.
+## 支持系统
 
-## Supported Systems
+- Ubuntu 20.04
+- Ubuntu 22.04
+- Ubuntu 24.04
+- Debian 系系统理论可用
 
-- Ubuntu 20.04, 22.04, 24.04
-- Debian-based Linux distributions
+## 可用脚本
 
-## Available Scripts
+| 命令 | 说明 |
+|---|---|
+| `vpsinfo` | 查看 VPS 基础运行状态 |
+| `vpsclean` | 安全清理 APT 缓存、systemd journal 日志和过旧临时文件 |
 
-| Script | Description |
-| --- | --- |
-| `vpsinfo` | Show hostname, OS version, kernel, uptime, CPU, memory, swap, disk, user, and network information. |
+## 安装 vpsclean
 
-## Install
+```bash
+curl -fsSL https://raw.githubusercontent.com/Alice060404/linux-tools/main/install.sh | sudo bash -s vpsclean
+```
 
-Install `vpsinfo` to `/usr/local/bin/vpsinfo`:
+安装脚本会从 GitHub 下载 `scripts/vpsclean`，安装到 `/usr/local/bin/vpsclean`，并添加执行权限。若本机已有同名命令或目标文件，会提示确认是否覆盖。
+
+## 使用 vpsclean
+
+```bash
+vpsclean
+vpsclean --dry-run
+sudo vpsclean --apply
+sudo vpsclean --yes
+sudo vpsclean --help
+```
+
+可选参数：
+
+```bash
+sudo vpsclean --apply --journal-days 7 --tmp-days 7
+sudo vpsclean --yes --journal-days 3 --tmp-days 10
+```
+
+- `--journal-days N`：systemd journal 只保留最近 N 天，默认 7 天。
+- `--tmp-days N`：清理 `/tmp` 中超过 N 天未访问的普通文件，默认 7 天。
+
+## 卸载 vpsclean
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Alice060404/linux-tools/main/uninstall.sh | sudo bash -s vpsclean
+```
+
+## 安装 vpsinfo
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Alice060404/linux-tools/main/install.sh | sudo bash -s vpsinfo
 ```
 
-The installer checks the system type, root permission, `curl`, remote script availability, and local command conflicts before installing.
-
-## Usage
-
-```bash
-vpsinfo
-```
-
-## Uninstall
+## 卸载 vpsinfo
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Alice060404/linux-tools/main/uninstall.sh | sudo bash -s vpsinfo
 ```
 
-This removes:
+## 安全说明
 
-```text
-/usr/local/bin/vpsinfo
-```
+- 默认 dry-run，不直接清理。
+- 执行真实清理需要 root 权限。
+- 不删除用户目录。
+- 不删除网站目录。
+- 不删除数据库目录。
+- 不直接删除 `/var/log/*`。
+- 不修改 SSH、防火墙、内核参数。
+- 不清理 Docker。
+- 不上传任何数据。
+- 不执行 `apt-get autoremove`。
 
-## Safety Notes
-
-- No background service is installed.
-- No cron job or systemd unit is created.
-- No SSH, firewall, or kernel parameter configuration is changed.
-- No GitHub token, SSH key, private key, or `.env` file should be committed.
-- Public IP detection inside `vpsinfo` uses `curl` only when available; missing `curl` does not stop the script.
-
-## Directory Structure
+## 目录结构
 
 ```text
 linux-tools/
 ├── scripts/
-│   └── vpsinfo
+│   ├── vpsinfo
+│   └── vpsclean
 ├── install.sh
 ├── uninstall.sh
 ├── README.md
@@ -66,12 +91,13 @@ linux-tools/
 └── .gitignore
 ```
 
-## Development
-
-After editing a script, commit and push the update:
+## 开发与更新
 
 ```bash
+cd ~/linux-tools
+nano scripts/vpsclean
+bash -n scripts/vpsclean
 git add .
-git commit -m "Update vpsinfo"
+git commit -m "Update vpsclean"
 git push
 ```

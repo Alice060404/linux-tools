@@ -2,7 +2,7 @@
 
 # Generic installer for scripts in Alice060404/linux-tools.
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Alice060404/linux-tools/main/install.sh | sudo bash -s vpsinfo
+#   curl -fsSL https://raw.githubusercontent.com/Alice060404/linux-tools/main/install.sh | sudo bash -s vpsclean
 
 set -u
 
@@ -67,7 +67,7 @@ check_root() {
 check_script_name() {
     local script_name="$1"
 
-    [ -n "$script_name" ] || die "未传入脚本名。用法：sudo bash install.sh vpsinfo"
+    [ -n "$script_name" ] || die "未传入脚本名。用法：sudo bash install.sh <script-name>，例如 vpsinfo 或 vpsclean。"
 
     case "$script_name" in
         .|..|*/*|*\\*|"")

@@ -1,0 +1,538 @@
+#!/usr/bin/env bash
+
+# vpsclean - safe Ubuntu/Debian VPS cache and log cleanup helper.
+# Default mode is dry-run; cleanup requires root and explicit --apply or --yes.
+
+set -u
+export LC_ALL=C
+
+APT_CACHE_DIR="/var/cache/apt/archives"
+TMP_DIR="/tmp"
+DEFAULT_JOURNAL_DAYS=7
+DEFAULT_TMP_DAYS=7
+
+MODE="dry-run"
+JOURNAL_DAYS="$DEFAULT_JOURNAL_DAYS"
+TMP_DAYS="$DEFAULT_TMP_DAYS"
+
+APT_RESULT="未执行"
+JOURNAL_RESULT="未执行"
+TMP_RESULT="未执行"
+TMP_DELETED_COUNT=0
+TMP_SKIPPED_COUNT=0
+TMP_FAILED_COUNT=0
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+die() {
+    printf '错误：%s\n' "$*" >&2
+    exit 1
+}
+
+print_kv() {
+    local label="$1"
+    local value="${2:-未知}"
+    printf '%-14s : %s\n' "$label" "$value"
+}
+
+show_help() {
+    cat <<'EOF'
+Usage:
+  vpsclean [--dry-run]
+  sudo vpsclean --apply
+  sudo vpsclean --yes
+
+Options:
+  --dry-run       只预览，不清理，默认模式
+  --apply         执行清理，执行前需要确认
+  --yes           执行清理，跳过确认
+  --journal-days  设置保留最近多少天的 systemd journal，默认 7
+  --tmp-days      清理 /tmp 中超过多少天未访问的普通文件，默认 7
+  --help          显示帮助
+
+Examples:
+  vpsclean
+  vpsclean --dry-run
+  sudo vpsclean --apply --journal-days 7 --tmp-days 7
+  sudo vpsclean --yes --journal-days 3 --tmp-days 10
+EOF
+}
+
+is_positive_integer() {
+    local value="${1:-}"
+
+    case "$value" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+        *)
+            [ "$value" -gt 0 ] 2>/dev/null
+            ;;
+    esac
+}
+
+require_root() {
+    if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+        die "执行清理需要 root 权限，请使用 sudo vpsclean --apply 或 sudo vpsclean --yes。"
+    fi
+}
+
+human_size() {
+    local kib="${1:-0}"
+
+    if ! is_positive_integer "$kib" && [ "$kib" != "0" ]; then
+        printf '未知'
+        return
+    fi
+
+    awk -v kib="$kib" 'BEGIN {
+        split("K M G T P", unit, " ")
+        value = kib + 0
+        if (value <= 0) {
+            printf "0B"
+            exit
+        }
+        i = 1
+        while (value >= 1024 && i < 5) {
+            value = value / 1024
+            i++
+        }
+        if (value >= 10 || value == int(value)) {
+            printf "%.0f%s", value, unit[i]
+        } else {
+            printf "%.1f%s", value, unit[i]
+        }
+    }'
+}
+
+get_dir_size() {
+    local dir="$1"
+    local size=""
+
+    if [ ! -e "$dir" ]; then
+        printf '0'
+        return
+    fi
+
+    if ! command_exists du; then
+        printf '0'
+        return
+    fi
+
+    size="$(du -sk -- "$dir" 2>/dev/null | awk 'NR == 1 {print $1; exit}')"
+    case "$size" in
+        ''|*[!0-9]*)
+            printf '0'
+            ;;
+        *)
+            printf '%s' "$size"
+            ;;
+    esac
+}
+
+get_os_version() {
+    local value=""
+
+    if command_exists lsb_release; then
+        value="$(lsb_release -ds 2>/dev/null | sed 's/^"\(.*\)"$/\1/' || true)"
+    fi
+
+    if [ -z "$value" ] && [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        value="${PRETTY_NAME:-${NAME:-} ${VERSION:-}}"
+    fi
+
+    if [ -n "$value" ]; then
+        printf '%s' "$value"
+    else
+        printf '未知'
+    fi
+}
+
+get_current_user() {
+    local value=""
+
+    if command_exists id; then
+        value="$(id -un 2>/dev/null || true)"
+    fi
+
+    if [ -n "$value" ]; then
+        printf '%s' "$value"
+    else
+        printf '%s' "${USER:-未知}"
+    fi
+}
+
+get_root_disk_line() {
+    local total="" used="" usage=""
+
+    if ! command_exists df; then
+        printf '未知'
+        return
+    fi
+
+    read -r total used usage < <(df -hP / 2>/dev/null | awk 'NR == 2 {print $2, $3, $5; exit}')
+    if [ -n "${total:-}" ] && [ -n "${used:-}" ] && [ -n "${usage:-}" ]; then
+        printf '%s / %s，使用率 %s' "$used" "$total" "$usage"
+    else
+        printf '未知'
+    fi
+}
+
+get_root_usage_percent() {
+    local usage=""
+
+    if ! command_exists df; then
+        printf '未知'
+        return
+    fi
+
+    usage="$(df -hP / 2>/dev/null | awk 'NR == 2 {print $5; exit}')"
+    if [ -n "$usage" ]; then
+        printf '%s' "$usage"
+    else
+        printf '未知'
+    fi
+}
+
+get_journal_usage() {
+    local output="" usage=""
+
+    if ! command_exists journalctl; then
+        printf 'journalctl 不可用'
+        return
+    fi
+
+    output="$(journalctl --disk-usage 2>/dev/null || true)"
+    usage="$(printf '%s\n' "$output" | sed -n 's/.*take up[[:space:]]\+\([^[:space:]]\+\).*/\1/p' | awk 'NR == 1 {print; exit}')"
+
+    if [ -n "$usage" ]; then
+        printf '%s' "$usage"
+    elif [ -n "$output" ]; then
+        printf '%s' "$output"
+    else
+        printf '未知'
+    fi
+}
+
+get_tmp_candidate_stats() {
+    local days="$1"
+    local count=0
+    local total_kib=0
+    local file="" size=""
+
+    if [ ! -d "$TMP_DIR" ] || ! command_exists find; then
+        printf '0 0'
+        return
+    fi
+
+    while IFS= read -r -d '' file; do
+        count=$((count + 1))
+        size="$(du -sk -- "$file" 2>/dev/null | awk 'NR == 1 {print $1; exit}')"
+        case "$size" in
+            ''|*[!0-9]*)
+                size=0
+                ;;
+        esac
+        total_kib=$((total_kib + size))
+    done < <(find "$TMP_DIR" -xdev -type f -atime +"$days" -print0 2>/dev/null || true)
+
+    printf '%s %s' "$count" "$total_kib"
+}
+
+show_status() {
+    printf '================ VPS 清理工具 ================\n\n'
+
+    printf '[系统信息]\n'
+    print_kv '主机名' "$(hostname 2>/dev/null || printf '未知')"
+    print_kv '系统版本' "$(get_os_version)"
+    print_kv '当前用户' "$(get_current_user)"
+    print_kv '当前时间' "$(date '+%Y-%m-%d %H:%M:%S %Z' 2>/dev/null || printf '未知')"
+
+    printf '\n[磁盘占用]\n'
+    print_kv '根分区' "$(get_root_disk_line)"
+    print_kv '/var/log' "$(human_size "$(get_dir_size "/var/log")")"
+    print_kv 'APT 缓存' "$(human_size "$(get_dir_size "$APT_CACHE_DIR")")"
+    print_kv 'Journal 日志' "$(get_journal_usage)"
+    print_kv '/tmp' "$(human_size "$(get_dir_size "$TMP_DIR")")"
+}
+
+dry_run() {
+    local tmp_count=0
+    local tmp_kib=0
+
+    show_status
+    read -r tmp_count tmp_kib < <(get_tmp_candidate_stats "$TMP_DAYS")
+
+    printf '\n[可清理项目]\n'
+    print_kv 'APT 缓存大小' "$(human_size "$(get_dir_size "$APT_CACHE_DIR")")"
+    print_kv 'Journal 当前占用' "$(get_journal_usage)"
+    print_kv '/tmp 候选文件' "${tmp_count} 个，约 $(human_size "$tmp_kib")"
+
+    printf '\n[清理计划]\n'
+    if command_exists apt-get; then
+        print_kv 'APT 缓存' 'apt-get clean && apt-get autoclean'
+    else
+        print_kv 'APT 缓存' 'apt-get 不可用，将跳过'
+    fi
+
+    if command_exists journalctl; then
+        print_kv 'Journal 日志' "journalctl --vacuum-time=${JOURNAL_DAYS}d"
+    else
+        print_kv 'Journal 日志' 'journalctl 不可用，将跳过'
+    fi
+
+    if command_exists find; then
+        print_kv '/tmp 文件' "清理超过 ${TMP_DAYS} 天未访问的普通文件"
+    else
+        print_kv '/tmp 文件' 'find 不可用，将跳过'
+    fi
+
+    printf '\n[清理规则说明]\n'
+    printf 'APT 缓存     : 只执行 apt-get clean/autoclean，不执行 autoremove。\n'
+    printf 'Journal 日志 : 只通过 journalctl vacuum 清理，不直接删除 /var/log/journal。\n'
+    printf '/tmp 文件    : 仅限 /tmp 同一文件系统内超过 %s 天未访问的普通文件，跳过正在使用的文件。\n' "$TMP_DAYS"
+    printf '安全边界     : 不清理用户目录、网站目录、数据库目录、Docker 或传统 /var/log 活跃日志。\n'
+
+    printf '\n当前为 dry-run 模式，未执行任何清理。\n'
+    printf '如需执行清理，请运行：\n'
+    printf 'sudo vpsclean --apply\n'
+}
+
+confirm_apply() {
+    local answer=""
+
+    printf '\n即将执行清理操作，是否继续？[y/N] '
+    if [ -r /dev/tty ]; then
+        read -r answer </dev/tty || answer=""
+    else
+        read -r answer || answer=""
+    fi
+
+    case "$answer" in
+        y|Y|yes|YES|Yes)
+            return 0
+            ;;
+        *)
+            printf '已取消，未执行清理。\n'
+            exit 0
+            ;;
+    esac
+}
+
+clean_apt_cache() {
+    local failed=0
+
+    if ! command_exists apt-get; then
+        APT_RESULT="apt-get 不可用，已跳过"
+        return
+    fi
+
+    printf '\n[执行] 清理 APT 缓存\n'
+    if ! apt-get clean; then
+        failed=1
+    fi
+    if ! apt-get autoclean; then
+        failed=1
+    fi
+
+    if [ "$failed" -eq 0 ]; then
+        APT_RESULT="已清理"
+    else
+        APT_RESULT="执行失败或部分失败"
+    fi
+}
+
+clean_journal() {
+    if ! command_exists journalctl; then
+        JOURNAL_RESULT="journalctl 不可用，已跳过"
+        return
+    fi
+
+    printf '\n[执行] 清理 systemd journal，保留最近 %s 天\n' "$JOURNAL_DAYS"
+    if journalctl --vacuum-time="${JOURNAL_DAYS}d"; then
+        JOURNAL_RESULT="已清理，保留最近 ${JOURNAL_DAYS} 天"
+    else
+        JOURNAL_RESULT="执行失败"
+    fi
+}
+
+is_file_in_use() {
+    local file="$1"
+    local fd="" target=""
+
+    if command_exists fuser; then
+        if fuser -s -- "$file" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    for fd in /proc/[0-9]*/fd/*; do
+        [ -e "$fd" ] || continue
+        target="$(readlink "$fd" 2>/dev/null || true)"
+        case "$target" in
+            "$file"|"$file (deleted)")
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
+clean_tmp_files() {
+    local file=""
+
+    TMP_DELETED_COUNT=0
+    TMP_SKIPPED_COUNT=0
+    TMP_FAILED_COUNT=0
+
+    if [ ! -d "$TMP_DIR" ]; then
+        TMP_RESULT="/tmp 不存在，已跳过"
+        return
+    fi
+
+    if ! command_exists find; then
+        TMP_RESULT="find 不可用，已跳过"
+        return
+    fi
+
+    printf '\n[执行] 清理 /tmp 中超过 %s 天未访问的普通文件\n' "$TMP_DAYS"
+    while IFS= read -r -d '' file; do
+        [ -f "$file" ] || continue
+
+        if is_file_in_use "$file"; then
+            TMP_SKIPPED_COUNT=$((TMP_SKIPPED_COUNT + 1))
+            continue
+        fi
+
+        if rm -f -- "$file"; then
+            TMP_DELETED_COUNT=$((TMP_DELETED_COUNT + 1))
+        else
+            TMP_FAILED_COUNT=$((TMP_FAILED_COUNT + 1))
+        fi
+    done < <(find "$TMP_DIR" -xdev -type f -atime +"$TMP_DAYS" -print0 2>/dev/null || true)
+
+    TMP_RESULT="已清理 ${TMP_DELETED_COUNT} 个文件"
+    if [ "$TMP_SKIPPED_COUNT" -gt 0 ]; then
+        TMP_RESULT="${TMP_RESULT}，跳过正在使用的文件 ${TMP_SKIPPED_COUNT} 个"
+    fi
+    if [ "$TMP_FAILED_COUNT" -gt 0 ]; then
+        TMP_RESULT="${TMP_RESULT}，失败 ${TMP_FAILED_COUNT} 个"
+    fi
+}
+
+parse_args() {
+    local selected_mode=""
+    local next_mode=""
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --dry-run)
+                next_mode="dry-run"
+                ;;
+            --apply)
+                next_mode="apply"
+                ;;
+            --yes)
+                next_mode="yes"
+                ;;
+            --journal-days)
+                shift
+                [ "$#" -gt 0 ] || die "--journal-days 需要一个正整数参数。"
+                JOURNAL_DAYS="$1"
+                next_mode=""
+                ;;
+            --journal-days=*)
+                JOURNAL_DAYS="${1#*=}"
+                next_mode=""
+                ;;
+            --tmp-days)
+                shift
+                [ "$#" -gt 0 ] || die "--tmp-days 需要一个正整数参数。"
+                TMP_DAYS="$1"
+                next_mode=""
+                ;;
+            --tmp-days=*)
+                TMP_DAYS="${1#*=}"
+                next_mode=""
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            *)
+                die "未知参数：$1"
+                ;;
+        esac
+
+        if [ -n "$next_mode" ]; then
+            if [ -n "$selected_mode" ] && [ "$selected_mode" != "$next_mode" ]; then
+                die "--dry-run、--apply、--yes 只能选择一种模式。"
+            fi
+            selected_mode="$next_mode"
+        fi
+
+        shift
+    done
+
+    MODE="${selected_mode:-dry-run}"
+
+    is_positive_integer "$JOURNAL_DAYS" || die "--journal-days 必须是正整数。"
+    is_positive_integer "$TMP_DAYS" || die "--tmp-days 必须是正整数。"
+}
+
+run_apply() {
+    local before_root=""
+    local after_root=""
+    local before_percent=""
+    local after_percent=""
+
+    require_root
+
+    show_status
+    before_root="$(get_root_disk_line)"
+    before_percent="$(get_root_usage_percent)"
+
+    if [ "$MODE" = "apply" ]; then
+        confirm_apply
+    fi
+
+    clean_apt_cache
+    clean_journal
+    clean_tmp_files
+
+    after_root="$(get_root_disk_line)"
+    after_percent="$(get_root_usage_percent)"
+
+    printf '\n[清理结果]\n'
+    print_kv '清理前根分区' "$before_root"
+    print_kv '清理后根分区' "$after_root"
+    print_kv '清理前使用率' "$before_percent"
+    print_kv '清理后使用率' "$after_percent"
+    print_kv 'APT 缓存' "$APT_RESULT"
+    print_kv 'Journal 日志' "$JOURNAL_RESULT"
+    print_kv '/tmp 旧文件' "$TMP_RESULT"
+    printf '\n完成。\n'
+}
+
+main() {
+    parse_args "$@"
+
+    case "$MODE" in
+        dry-run)
+            dry_run
+            ;;
+        apply|yes)
+            run_apply
+            ;;
+        *)
+            die "未知执行模式：$MODE"
+            ;;
+    esac
+}
+
+main "$@"
