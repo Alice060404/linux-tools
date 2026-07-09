@@ -1,0 +1,647 @@
+#!/usr/bin/env bash
+
+# 5command - interactive Linux command reference.
+# This script only displays documentation and never changes system state.
+
+set -u
+
+readonly CATEGORY_COUNT=14
+
+show_help() {
+    cat <<'EOF'
+用法：
+  5command              打开交互式分类菜单
+  5command <数字>       直接查看指定分类
+  5command --list       列出所有分类
+  5command --help       显示帮助
+
+说明：
+  本工具只查阅命令，不会执行列表中的任何命令。
+  部分命令需要额外安装，或需要 root/sudo 权限。
+EOF
+}
+
+show_categories() {
+    cat <<'EOF'
+  1. 文件与目录
+  2. 文本查看与处理
+  3. 用户、用户组与权限
+  4. 系统与硬件信息
+  5. 进程与任务管理
+  6. 磁盘与文件系统
+  7. 网络配置与诊断
+  8. 服务、启动与日志
+  9. 软件包管理
+ 10. 压缩与归档
+ 11. SSH 与文件传输
+ 12. Shell、环境与帮助
+ 13. 安全与防火墙
+ 14. 容器与 Docker
+EOF
+}
+
+show_menu() {
+    printf '\nLinux 常用命令分类\n'
+    printf '%s\n' '=================='
+    show_categories
+    printf '\n  0. 退出\n'
+}
+
+show_file_commands() {
+    cat <<'EOF'
+
+[1] 文件与目录
+
+  pwd
+      显示当前工作目录的绝对路径。
+  ls -lah [目录]
+      列出目录内容；-l 显示详情，-a 包含隐藏项，-h 使用易读大小。
+  cd [目录]
+      切换工作目录；cd - 返回上一个目录，cd ~ 返回家目录。
+  mkdir -p <目录>
+      创建目录；-p 会同时创建缺失的父目录。
+  rmdir <空目录>
+      删除空目录，不会删除包含文件的目录。
+  touch <文件>
+      创建空文件，或更新已有文件的访问和修改时间。
+  cp -a <源> <目标>
+      复制文件或目录，并尽量保留权限、时间和链接等属性。
+  mv <源> <目标>
+      移动文件或目录，也可用于重命名。
+  rm -i <文件>
+      删除文件；-i 会在删除前询问，使用 -rf 时务必核对路径。
+  ln -s <目标> <链接名>
+      创建指向目标的符号链接。
+  find <路径> -name '<模式>'
+      递归查找文件，例如 find /var/log -name '*.log'。
+  locate <文件名>
+      通过索引快速查找路径；结果可能需要先运行 updatedb 更新。
+  tree -a [目录]
+      以树状结构显示目录；通常需要单独安装 tree。
+  stat <文件>
+      显示文件大小、权限、时间戳和 inode 等详细信息。
+  file <文件>
+      根据文件内容判断文件类型，而不是只看扩展名。
+  basename <路径>
+      从完整路径中取出最后的文件名部分。
+  dirname <路径>
+      从完整路径中取出目录部分。
+EOF
+}
+
+show_text_commands() {
+    cat <<'EOF'
+
+[2] 文本查看与处理
+
+  cat <文件>
+      输出整个文件；适合查看较短文本。
+  less <文件>
+      分页查看长文本；可搜索，按 q 退出。
+  head -n <行数> <文件>
+      查看文件开头指定行数，默认 10 行。
+  tail -n <行数> <文件>
+      查看文件末尾指定行数；tail -f 可持续跟踪新增内容。
+  wc -l <文件>
+      统计行数；-w 统计单词，-c 统计字节。
+  grep -Rni '<关键词>' <路径>
+      递归搜索文本；显示行号并忽略大小写。
+  sort <文件>
+      对文本行排序；-n 按数字排序，-r 反向排序。
+  uniq -c
+      合并相邻重复行并计数，通常接在 sort 后使用。
+  cut -d'<分隔符>' -f<列号> <文件>
+      按分隔符提取指定列。
+  tr '<字符集1>' '<字符集2>'
+      替换或删除字符，通常处理管道输入。
+  sed 's/旧内容/新内容/g' <文件>
+      按规则转换文本；默认只输出结果，不修改原文件。
+  awk '{print $1}' <文件>
+      按字段处理文本，适合筛选、计算和格式化输出。
+  paste <文件1> <文件2>
+      按行合并多个文件的内容。
+  column -t
+      将分隔文本排成对齐的表格。
+  diff -u <旧文件> <新文件>
+      以统一格式比较两个文本文件的差异。
+  tee <文件>
+      将管道输出同时显示在终端并写入文件。
+  xargs <命令>
+      把标准输入转换为命令参数；处理特殊文件名时优先使用 -0。
+  strings <二进制文件>
+      提取二进制文件中可打印的文本片段。
+EOF
+}
+
+show_user_commands() {
+    cat <<'EOF'
+
+[3] 用户、用户组与权限
+
+  whoami
+      显示当前有效用户名。
+  id [用户名]
+      显示用户 UID、主组和附加组。
+  who
+      显示当前登录系统的用户和终端。
+  w
+      显示登录用户及其正在运行的任务。
+  last
+      查看历史登录记录。
+  sudo <命令>
+      以授权身份执行单条命令，通常是 root。
+  su - <用户名>
+      切换用户并加载目标用户的登录环境。
+  passwd [用户名]
+      修改密码；root 可指定其他用户。
+  useradd -m <用户名>
+      创建用户并建立家目录；通常需要 root 权限。
+  usermod -aG <组> <用户名>
+      将用户追加到附加组；不要遗漏 -a。
+  userdel -r <用户名>
+      删除用户及其家目录，执行前应确认数据已备份。
+  groups [用户名]
+      显示用户所属的用户组。
+  chmod <权限> <文件>
+      修改权限，例如 chmod 640 file 或 chmod +x script。
+  chown <用户>:<组> <文件>
+      修改文件所有者和所属组。
+  chgrp <组> <文件>
+      只修改文件所属组。
+  umask
+      查看或设置新建文件、目录的默认权限掩码。
+  getfacl <文件>
+      查看文件 ACL 扩展权限；可能需要安装 acl。
+  setfacl -m u:<用户>:<权限> <文件>
+      为指定用户设置 ACL 扩展权限。
+EOF
+}
+
+show_system_commands() {
+    cat <<'EOF'
+
+[4] 系统与硬件信息
+
+  uname -a
+      显示内核版本、架构和主机等综合信息。
+  hostnamectl
+      查看或设置主机名，并显示系统和内核摘要。
+  uptime
+      显示运行时长、在线用户数和系统负载。
+  date
+      显示或设置系统日期时间。
+  timedatectl
+      查看时区、时间同步状态和系统时间。
+  lsb_release -a
+      显示 Linux 发行版信息；部分系统需安装 lsb-release。
+  cat /etc/os-release
+      查看发行版名称、版本和代号。
+  lscpu
+      显示 CPU 架构、核心数和型号。
+  free -h
+      以易读单位显示内存和 Swap 使用情况。
+  vmstat 1
+      按秒显示进程、内存、I/O 和 CPU 统计。
+  lsblk
+      以树状形式显示磁盘、分区和挂载点。
+  lspci
+      列出 PCI 设备，例如网卡、显卡和存储控制器。
+  lsusb
+      列出 USB 设备。
+  dmidecode
+      读取 BIOS、主板和内存硬件信息；通常需要 root。
+  dmesg -T
+      查看带易读时间的内核消息。
+  sysctl -a
+      显示内核运行参数；修改前应了解参数影响。
+EOF
+}
+
+show_process_commands() {
+    cat <<'EOF'
+
+[5] 进程与任务管理
+
+  ps aux
+      显示所有用户的进程及 CPU、内存占用。
+  ps -ef --forest
+      以父子关系树显示全部进程。
+  top
+      实时查看进程和系统资源使用情况。
+  htop
+      交互式进程查看器；功能更直观，通常需要单独安装。
+  pgrep -af <名称>
+      按名称查找进程，并显示 PID 和完整命令行。
+  pstree -p
+      以树状结构显示进程及 PID。
+  kill <PID>
+      向进程发送终止信号；默认是 SIGTERM。
+  kill -9 <PID>
+      强制终止无响应进程；应在普通 kill 无效后使用。
+  pkill -f '<模式>'
+      按完整命令行模式向匹配进程发送信号。
+  nice -n <优先级> <命令>
+      以指定调度优先级启动命令，数值越大优先级越低。
+  renice <优先级> -p <PID>
+      调整正在运行进程的调度优先级。
+  jobs -l
+      查看当前 Shell 的后台和暂停任务。
+  bg %<任务号>
+      让暂停的 Shell 任务在后台继续运行。
+  fg %<任务号>
+      将后台任务切换到前台。
+  nohup <命令> &
+      让命令在退出终端后继续运行。
+  watch -n <秒数> '<命令>'
+      按指定间隔重复执行命令并刷新结果。
+EOF
+}
+
+show_disk_commands() {
+    cat <<'EOF'
+
+[6] 磁盘与文件系统
+
+  df -hT
+      显示已挂载文件系统的容量、使用率和类型。
+  du -sh <路径>
+      汇总指定文件或目录占用空间。
+  du -xhd1 <目录>
+      查看目录下一级空间占用，并限制在当前文件系统。
+  lsblk -f
+      显示块设备、文件系统类型、UUID 和挂载点。
+  blkid
+      显示块设备的 UUID 和文件系统类型；通常需要 root。
+  findmnt
+      以树状结构显示当前挂载关系和挂载参数。
+  mount <设备> <挂载点>
+      挂载文件系统；永久挂载通常配置 /etc/fstab。
+  umount <挂载点>
+      卸载文件系统；若繁忙，应先找出占用进程。
+  fdisk -l
+      列出磁盘分区表；通常需要 root。
+  parted -l
+      显示磁盘与 GPT/MBR 分区信息。
+  fsck <设备>
+      检查并修复文件系统；不得对正在读写的文件系统直接运行。
+  tune2fs -l <设备>
+      查看 ext2/ext3/ext4 文件系统参数。
+  fuser -vm <挂载点>
+      显示正在使用指定文件系统的进程。
+  sync
+      将内存中尚未落盘的数据写入存储设备。
+EOF
+}
+
+show_network_commands() {
+    cat <<'EOF'
+
+[7] 网络配置与诊断
+
+  ip address
+      显示网卡和 IP 地址。
+  ip route
+      显示路由表和默认网关。
+  ip link
+      查看或设置网卡链路状态。
+  ss -lntup
+      显示正在监听的 TCP/UDP 端口及相关进程。
+  ping -c 4 <主机>
+      发送 ICMP 请求，检查连通性和延迟。
+  traceroute <主机>
+      跟踪数据包经过的网络节点；可能需要单独安装。
+  mtr <主机>
+      持续结合 ping 与路由跟踪，适合定位丢包节点。
+  curl -I <URL>
+      请求 URL 并只显示 HTTP 响应头。
+  wget <URL>
+      从 HTTP、HTTPS 或 FTP 下载文件。
+  dig <域名>
+      查询 DNS 记录和解析过程。
+  nslookup <域名>
+      交互式查询域名或 IP 的 DNS 信息。
+  nc -vz <主机> <端口>
+      测试目标 TCP 端口是否可以连接。
+  tcpdump -ni any <过滤条件>
+      抓取并分析网络数据包；通常需要 root。
+  ethtool <网卡>
+      查看网卡速率、双工和链路状态。
+  resolvectl status
+      查看 systemd-resolved 的 DNS 服务器和解析状态。
+EOF
+}
+
+show_service_commands() {
+    cat <<'EOF'
+
+[8] 服务、启动与日志
+
+  systemctl status <服务>
+      查看 systemd 服务状态和最近日志。
+  systemctl start|stop|restart <服务>
+      启动、停止或重启服务；通常需要 root。
+  systemctl enable|disable <服务>
+      设置或取消服务开机启动。
+  systemctl list-units --type=service
+      列出当前加载的服务单元。
+  systemctl list-timers --all
+      列出 systemd 定时器及其下次运行时间。
+  journalctl -u <服务>
+      查看指定 systemd 服务的日志。
+  journalctl -f
+      实时跟踪系统日志。
+  journalctl -p err -b
+      查看本次启动以来错误级别的日志。
+  systemd-analyze blame
+      按耗时列出启动阶段的 systemd 单元。
+  service <服务> status
+      兼容 SysV/systemd 的传统服务管理入口。
+  logger '<消息>'
+      将自定义消息写入系统日志。
+  logrotate -d <配置文件>
+      调试日志轮换配置；-d 只预览，不执行轮换。
+EOF
+}
+
+show_package_commands() {
+    cat <<'EOF'
+
+[9] 软件包管理
+
+  apt update
+      Debian/Ubuntu：刷新软件包索引。
+  apt upgrade
+      Debian/Ubuntu：升级已安装且无需移除其他包的软件包。
+  apt install <包名>
+      Debian/Ubuntu：安装软件包。
+  apt remove <包名>
+      Debian/Ubuntu：卸载软件包，通常保留配置文件。
+  apt search <关键词>
+      Debian/Ubuntu：搜索可用软件包。
+  apt show <包名>
+      Debian/Ubuntu：查看软件包说明、版本和依赖。
+  dpkg -l
+      Debian/Ubuntu：列出已安装或已知的包。
+  dpkg -L <包名>
+      Debian/Ubuntu：列出某个包安装的全部文件。
+  dpkg -S <路径>
+      Debian/Ubuntu：查询指定文件属于哪个包。
+  snap list
+      列出已安装的 Snap 软件包。
+  snap refresh
+      立即检查并更新 Snap 软件包。
+  dnf install|upgrade <包名>
+      Fedora/RHEL 新版本：安装软件或升级软件包。
+  yum install|update <包名>
+      CentOS/RHEL 旧版本：安装或更新软件包。
+  rpm -qa
+      RPM 系发行版：列出所有已安装的 RPM 包。
+  pacman -Syu
+      Arch Linux：同步软件源并升级全部软件包。
+EOF
+}
+
+show_archive_commands() {
+    cat <<'EOF'
+
+[10] 压缩与归档
+
+  tar -czf <归档.tar.gz> <路径>
+      将文件或目录打包并使用 gzip 压缩。
+  tar -xzf <归档.tar.gz>
+      解压 gzip 格式的 tar 归档。
+  tar -cJf <归档.tar.xz> <路径>
+      创建使用 xz 压缩的 tar 归档。
+  tar -tf <归档文件>
+      不解压，只列出 tar 归档内容。
+  gzip <文件>
+      使用 gzip 压缩单个文件，原文件默认被替换。
+  gunzip <文件.gz>
+      解压 gzip 文件。
+  xz <文件>
+      使用 xz 压缩单个文件，通常压缩率较高。
+  unxz <文件.xz>
+      解压 xz 文件。
+  zip -r <归档.zip> <路径>
+      递归创建 ZIP 压缩包。
+  unzip <归档.zip>
+      解压 ZIP 文件。
+  7z a <归档.7z> <路径>
+      创建 7z 归档；通常需要安装 p7zip。
+  7z x <归档.7z>
+      解压 7z 归档并保留目录结构。
+EOF
+}
+
+show_remote_commands() {
+    cat <<'EOF'
+
+[11] SSH 与文件传输
+
+  ssh <用户>@<主机>
+      通过 SSH 登录远程服务器。
+  ssh -p <端口> <用户>@<主机>
+      通过指定端口建立 SSH 连接。
+  ssh-keygen -t ed25519
+      创建 Ed25519 SSH 密钥对。
+  ssh-copy-id <用户>@<主机>
+      将本机公钥加入远程账户的授权密钥。
+  scp <本地文件> <用户>@<主机>:<路径>
+      通过 SSH 将本地文件复制到远程主机。
+  scp <用户>@<主机>:<文件> <本地路径>
+      通过 SSH 从远程主机下载文件。
+  sftp <用户>@<主机>
+      以交互方式安全上传和下载文件。
+  rsync -avh <源> <目标>
+      增量同步目录，并保留常用文件属性。
+  rsync -avz -e ssh <源> <用户>@<主机>:<路径>
+      通过 SSH 压缩并增量同步到远程主机。
+  ssh -L <本地端口>:<目标主机>:<目标端口> <跳板主机>
+      建立 SSH 本地端口转发。
+EOF
+}
+
+show_shell_commands() {
+    cat <<'EOF'
+
+[12] Shell、环境与帮助
+
+  man <命令>
+      打开命令的完整手册页。
+  <命令> --help
+      快速查看命令用法和选项。
+  help <内建命令>
+      查看 Bash 内建命令的帮助。
+  command -v <命令>
+      判断命令是否存在，并显示实际调用路径。
+  type <命令>
+      判断名称是程序、别名、函数还是 Shell 内建命令。
+  which <命令>
+      在 PATH 中查找可执行文件；脚本中优先使用 command -v。
+  history
+      显示当前用户的 Shell 命令历史。
+  echo '<文本>'
+      输出文本或变量值。
+  printf '<格式>' <参数>
+      按指定格式输出，行为通常比 echo 更稳定。
+  env
+      显示当前环境变量，或在临时环境中运行命令。
+  export <变量>=<值>
+      设置并导出环境变量给子进程。
+  alias <名称>='<命令>'
+      为常用命令创建当前 Shell 会话中的别名。
+  source <文件>
+      在当前 Shell 中加载配置或执行脚本内容。
+  clear
+      清空当前终端显示。
+  sleep <秒数>
+      暂停指定时间后继续执行。
+  time <命令>
+      统计命令的实际耗时、用户态和内核态 CPU 时间。
+EOF
+}
+
+show_security_commands() {
+    cat <<'EOF'
+
+[13] 安全与防火墙
+
+  ufw status verbose
+      查看 UFW 防火墙状态和规则。
+  ufw allow <端口>/<协议>
+      允许指定端口和协议；修改前应确保不会阻断 SSH。
+  nft list ruleset
+      查看 nftables 的完整防火墙规则集。
+  iptables -L -n -v
+      查看传统 iptables 过滤规则和计数。
+  fail2ban-client status
+      查看 Fail2ban 运行状态和已启用的 jail。
+  ss -lntup
+      排查本机对外监听的端口和进程。
+  openssl version
+      显示 OpenSSL 版本。
+  openssl x509 -in <证书> -noout -text
+      查看 PEM 证书的签发者、域名和有效期等详情。
+  sha256sum <文件>
+      计算 SHA-256 摘要，用于校验文件完整性。
+  lastb
+      查看失败登录记录；通常需要 root。
+  chage -l <用户名>
+      查看用户密码过期和账户有效期策略。
+EOF
+}
+
+show_container_commands() {
+    cat <<'EOF'
+
+[14] 容器与 Docker
+
+  docker ps
+      列出正在运行的容器；-a 包含已停止容器。
+  docker images
+      列出本地镜像。
+  docker pull <镜像>
+      从镜像仓库拉取镜像。
+  docker run [选项] <镜像>
+      基于镜像创建并启动新容器。
+  docker exec -it <容器> <命令>
+      在运行中的容器内执行交互式命令。
+  docker logs -f <容器>
+      查看并持续跟踪容器日志。
+  docker inspect <对象>
+      查看容器、镜像、网络或卷的底层配置。
+  docker stop <容器>
+      请求容器正常停止。
+  docker rm <容器>
+      删除已停止的容器。
+  docker system df
+      查看 Docker 镜像、容器、卷和构建缓存占用。
+  docker compose up -d
+      按 Compose 配置在后台创建并启动服务。
+  docker compose down
+      停止并删除 Compose 创建的容器和网络。
+EOF
+}
+
+show_category() {
+    case "$1" in
+        1) show_file_commands ;;
+        2) show_text_commands ;;
+        3) show_user_commands ;;
+        4) show_system_commands ;;
+        5) show_process_commands ;;
+        6) show_disk_commands ;;
+        7) show_network_commands ;;
+        8) show_service_commands ;;
+        9) show_package_commands ;;
+        10) show_archive_commands ;;
+        11) show_remote_commands ;;
+        12) show_shell_commands ;;
+        13) show_security_commands ;;
+        14) show_container_commands ;;
+        *)
+            printf '错误：分类编号必须是 1-%s。\n' "$CATEGORY_COUNT" >&2
+            return 1
+            ;;
+    esac
+}
+
+pause_for_menu() {
+    if [ -t 0 ]; then
+        printf '\n按 Enter 返回分类菜单...'
+        read -r _ || true
+    fi
+}
+
+interactive_menu() {
+    local choice=""
+
+    while true; do
+        show_menu
+        printf '\n请输入分类编号：'
+        if ! read -r choice; then
+            printf '\n'
+            return 0
+        fi
+
+        case "$choice" in
+            0|q|Q|quit|exit)
+                printf '已退出。\n'
+                return 0
+                ;;
+            ''|*[!0-9]*)
+                printf '输入无效，请输入 1-%s，或输入 0 退出。\n' "$CATEGORY_COUNT" >&2
+                ;;
+            *)
+                if show_category "$choice"; then
+                    pause_for_menu
+                else
+                    printf '请重新选择。\n' >&2
+                fi
+                ;;
+        esac
+    done
+}
+
+main() {
+    case "${1:-}" in
+        "")
+            interactive_menu
+            ;;
+        --help|-h)
+            show_help
+            ;;
+        --list|-l)
+            show_categories
+            ;;
+        *)
+            if [ "$#" -ne 1 ]; then
+                show_help >&2
+                return 2
+            fi
+            show_category "$1"
+            ;;
+    esac
+}
+
+main "$@"
